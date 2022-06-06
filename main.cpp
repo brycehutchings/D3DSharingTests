@@ -8,7 +8,7 @@
 using namespace winrt;
 
 // TextureSharing.cpp
-void TexturePermationSharingTests(com_ptr<ID3D11Device5> d3d11Device, com_ptr<ID3D12Device> d3d12Device, com_ptr<ID3D12Device> d3d12DeviceSecond);
+void TexturePermationSharingTests(com_ptr<ID3D11Device5> d3d11Device, com_ptr<ID3D11Device5> d3d11DeviceSecond, com_ptr<ID3D12Device> d3d12Device, com_ptr<ID3D12Device> d3d12DeviceSecond);
 
 // FenceSharing.cpp
 void Fence11To12Test(com_ptr<ID3D11Device5> d3d11Device, com_ptr<ID3D12Device> d3d12Device);
@@ -91,7 +91,8 @@ int main()
 		//
 		// Run the test(s)
 		//
-		TexturePermationSharingTests(d3d11Device1, d3d12Device1, d3d12Device2);
+		TexturePermationSharingTests(d3d11Device1, d3d11Device2, d3d12Device1, d3d12Device2);
+
 		Fence11To12Test(d3d11Device1, d3d12Device1);
 		Fence12To11Test(d3d11Device1, d3d12Device1);
 		Fence12To12Test(d3d12Device1, d3d12Device2);

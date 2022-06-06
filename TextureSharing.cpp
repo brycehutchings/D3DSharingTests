@@ -61,17 +61,15 @@ com_ptr<ID3D12Resource> OpenSharedTextureForD3D12(com_ptr<ID3D12Device> d3d12Dev
 	return texture12;
 }
 
-com_ptr<ID3D11Texture2D> OpenSharedTextureForD3D11(com_ptr<ID3D11Device5> d3d11Device, HANDLE textureHandle)
+com_ptr<ID3D11Texture2D> OpenSharedTextureForD3D11(com_ptr<ID3D11Device5> d3d11Device, HANDLE textureHandle, bool isNtHandle)
 {
 	com_ptr<ID3D11Texture2D> texture11;
-	check_hresult(d3d11Device->OpenSharedResource(textureHandle, IID_PPV_ARGS(&texture11)));
-	return texture11;
-}
-
-com_ptr<ID3D11Texture2D> OpenSharedTexture1ForD3D11(com_ptr<ID3D11Device5> d3d11Device, HANDLE textureHandle)
-{
-	com_ptr<ID3D11Texture2D> texture11;
-	check_hresult(d3d11Device->OpenSharedResource1(textureHandle, IID_PPV_ARGS(&texture11)));
+	if (isNtHandle) {
+		check_hresult(d3d11Device->OpenSharedResource1(textureHandle, IID_PPV_ARGS(&texture11))); \
+	}
+	else {
+		check_hresult(d3d11Device->OpenSharedResource(textureHandle, IID_PPV_ARGS(&texture11)));
+	}
 	return texture11;
 }
 
@@ -87,17 +85,8 @@ struct StrValue
 #define MAKE_VAL(x) StrValue(x, #x)
 #define MAKE_VAL2(t, x) StrValue<t>((t)(x), #x)
 
-void TexturePermationSharingTests(com_ptr<ID3D11Device5> d3d11Device, com_ptr<ID3D12Device> d3d12Device, com_ptr<ID3D12Device> d3d12DeviceSecond) {
+void TexturePermationSharingTests(com_ptr<ID3D11Device5> d3d11Device, com_ptr<ID3D11Device5> d3d11DeviceSecond, com_ptr<ID3D12Device> d3d12Device, com_ptr<ID3D12Device> d3d12DeviceSecond) {
 	const StrValue<DXGI_FORMAT> formats[] = {
-#if 0
-		// Color
-		MAKE_VAL(DXGI_FORMAT_R8G8B8A8_TYPELESS),
-		MAKE_VAL(DXGI_FORMAT_R8G8B8A8_UNORM_SRGB),
-		// Depth
-		MAKE_VAL(DXGI_FORMAT_D32_FLOAT),
-		MAKE_VAL(DXGI_FORMAT_D24_UNORM_S8_UINT),
-		MAKE_VAL(DXGI_FORMAT_R24G8_TYPELESS),
-#else
 MAKE_VAL(DXGI_FORMAT_R24G8_TYPELESS),
 MAKE_VAL(DXGI_FORMAT_D24_UNORM_S8_UINT),
 MAKE_VAL(DXGI_FORMAT_R24_UNORM_X8_TYPELESS),
@@ -147,7 +136,7 @@ MAKE_VAL(DXGI_FORMAT_R16G16B16A16_SNORM),
 MAKE_VAL(DXGI_FORMAT_R16G16B16A16_SINT),
 
 /*
-
+// Less common formats excluded by default
 MAKE_VAL(DXGI_FORMAT_NV11),
 MAKE_VAL(DXGI_FORMAT_NV12),
 MAKE_VAL(DXGI_FORMAT_R32G32B32A32_TYPELESS),
@@ -226,7 +215,6 @@ MAKE_VAL(DXGI_FORMAT_P208),
 MAKE_VAL(DXGI_FORMAT_V208),
 MAKE_VAL(DXGI_FORMAT_V408)
 */
-#endif
 	};
 
 	const StrValue<D3D11_BIND_FLAG> bindFlags11[] = {
@@ -236,21 +224,62 @@ MAKE_VAL(DXGI_FORMAT_V408)
 	};
 	const StrValue<D3D11_RESOURCE_MISC_FLAG> miscFlags11[] = {
 		MAKE_VAL(D3D11_RESOURCE_MISC_SHARED),
-		MAKE_VAL2(D3D11_RESOURCE_MISC_FLAG, D3D11_RESOURCE_MISC_SHARED|D3D11_RESOURCE_MISC_SHARED_NTHANDLE)
+		MAKE_VAL2(D3D11_RESOURCE_MISC_FLAG, D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE)
 	};
 	const StrValue<D3D12_RESOURCE_FLAGS> resourceFlags12[] = {
 		MAKE_VAL(D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL),
-		MAKE_VAL(D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL|D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE),
+		MAKE_VAL(D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE),
 		MAKE_VAL(D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET),
-		MAKE_VAL(D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET|D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS)
+		MAKE_VAL(D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS)
 	};
 
 	for (auto format : formats) {
 		printf("Format %s\n", format.Str);
 
+		// 11 to 11
+		printf("  D3D11 shared to D3D11:\n");
+		bool textureCreated = false;
+		for (auto bindFlag : bindFlags11) {
+			for (auto miscFlag : miscFlags11) {
+				HANDLE texture11{};
+				handle smartHandle;
+				bool isNtHandle;
+
+				const char* result = "Unknown";
+
+				// Create the D3D11 texture and share to a handle
+				try {
+					texture11 = CreateD3D11Texture(d3d11Device, format.Value, bindFlag.Value, miscFlag.Value);
+					isNtHandle = (miscFlag.Value & D3D11_RESOURCE_MISC_SHARED_NTHANDLE);
+					if (isNtHandle) {
+						smartHandle.attach(texture11); // Ensure CloseHandle is called on NT handles.
+					}
+					textureCreated = true;
+				}
+				catch (...) {
+					result = "D3D11 Texture not created";
+					continue; // No point in displaying data for invalid texture configuration.
+				}
+
+				if (texture11) {
+					try {
+						auto texture11b = OpenSharedTextureForD3D11(d3d11Device, texture11, isNtHandle);
+						result = "Success";
+					}
+					catch (...) {
+					}
+				}
+
+				printf("    Bind=%-26s Misc=%-65s = %s\n", bindFlag.Str, miscFlag.Str, result);
+			}
+		}
+		if (!textureCreated) {
+			printf("    Cannot create source texture\n"); // None of the flag permutations are correct for this format.
+		}
+
 		// 11 to 12
 		printf("  D3D11 shared to D3D12:\n");
-		bool textureCreated = false;
+		textureCreated = false;
 		for (auto bindFlag : bindFlags11) {
 			for (auto miscFlag : miscFlags11) {
 				HANDLE texture11{};
@@ -305,20 +334,8 @@ MAKE_VAL(DXGI_FORMAT_V408)
 			}
 
 			if (texture12) {
-				// ID3D11Device::OpenSharedResource never works because it expects KMT/non-NT handle and D3D12 only creates NT handle.
-				/*
 				try {
-					auto texture11 = OpenSharedTextureForD3D11(d3d11Device, texture12.get());
-					result = "Success";
-				}
-				catch (...) {
-					result = "Failed";
-				}
-				printf("    (OpenSharedResource)  %-40s = %s\n", resourceFlag.Str, result);
-				*/
-
-				try {
-					auto texture11 = OpenSharedTexture1ForD3D11(d3d11Device, texture12.get());
+					auto texture11 = OpenSharedTextureForD3D11(d3d11Device, texture12.get(), true /* d3d12 is always nt handle */);
 					result = "Success";
 				}
 				catch (...) {
@@ -331,7 +348,6 @@ MAKE_VAL(DXGI_FORMAT_V408)
 			printf("    Cannot create source texture\n"); // None of the flag permutations are correct for this format.
 		}
 
-#if 0
 		// 12 to 12
 		printf("  D3D12 shared to D3D12:\n");
 		textureCreated = false;
@@ -363,7 +379,6 @@ MAKE_VAL(DXGI_FORMAT_V408)
 		if (!textureCreated) {
 			printf("    Cannot create source texture\n"); // None of the flag permutations are correct for this format.
 		}
-#endif
 
 		printf("\n");
 	}
